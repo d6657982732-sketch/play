@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Спавн в лесу — 3D интерактив</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: #dcd7ba;
+            background: rgba(20, 30, 10, 0.7);
+            padding: 8px 18px;
+            border-radius: 40px;
+            backdrop-filter: blur(5px);
+            border: 1px solid #6a8e4a;
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            letter-spacing: 0.5px;
+        }
+        #info i {
+            font-style: normal;
+            color: #c5f0a4;
+            margin-right: 6px;
+        }
+        .controls-note {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: #bbb;
+            background: rgba(10, 15, 5, 0.6);
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 13px;
+            backdrop-filter: blur(4px);
+            border: 1px solid #4a6130;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <i>🌲</i> Вы появились в лесу · осмотритесь
+    </div>
+    <div class="controls-note">
+        🖱️ Мышь · WASD · Shift/пробел
+    </div>
+
+    <!-- Импорт Three.js и OrbitControls для удобного обзора (спавн с земли) -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.126.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.126.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Инициализация сцены, камеры, рендера ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xaaccbb); // светло-зеленоватое небо
+        scene.fog = new THREE.Fog(0xaaccbb, 20, 60); // туман для глубины
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // Устанавливаем камеру так, чтобы создавалось ощущение спавна посреди леса
+        camera.position.set(5, 2, 8);  // стоим на земле, чуть смещены
+        camera.lookAt(7, 1.5, 5);      // смотрим чуть вглубь леса
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // тени для реализма
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // мягкие тени
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Освещение ---
+        // Основной солнечный свет (с тенью)
+        const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+        sunLight.position.set(20, 30, 10);
+        sunLight.castShadow = true;
+        sunLight.receiveShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
+        const d = 30;
+        sunLight.shadow.camera.left = -d;
+        sunLight.shadow.camera.right = d;
+        sunLight.shadow.camera.top = d;
+        sunLight.shadow.camera.bottom = -d;
+        sunLight.shadow.camera.near = 1;
+        sunLight.shadow.camera.far = 50;
+        scene.add(sunLight);
+
+        // Заполняющий свет от неба
+        const ambientLight = new THREE.AmbientLight(0x404c38, 0.9); // зеленоватый оттенок
+        scene.add(ambientLight);
+
+        // Подсветка снизу для мягкости
+        const backLight = new THREE.DirectionalLight(0xccddbb, 0.4);
+        backLight.position.set(-5, 0, -10);
+        scene.add(backLight);
+
+        // --- Земля с травяной текстурой и реалистичным видом ---
+        const groundGeometry = new THREE.CircleGeometry(80, 64);
+        const groundMaterial = new THREE.MeshStandardMaterial({
+            color: 0x4a6b3a,
+            roughness: 0.8,
+            metalness: 0.1,
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.05; // чуть ниже нуля, чтобы трава была на уровне
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Добавим "ковер" из мелких травинок (много точек) — через траву (поверхность с травяным узором)
+        // Создадим травяной газон с помощью множества маленьких плоскостей? Но это тяжело.
+        // Вместо этого используем процедурную текстуру или просто разноцветные пятна.
+        // Сделаем простую подложку с неровным цветом через деколь (разбросанные темные и светлые круги)
+        
+        // Для реализма добавим множество маленьких кустиков (точечная трава) с помощью частиц
+        const grassBladeCount = 800;
+        const grassGeometry = new THREE.BufferGeometry();
+        const grassPositions = [];
+        const grassColors = [];
+
+        for (let i = 0; i < grassBladeCount; i++) {
+            // случайная точка в радиусе 25 метров от центра
+            const r = Math.random() * 24;
+            const angle = Math.random() * Math.PI * 2;
+            const x = Math.cos(angle) * r;
+            const z = Math.sin(angle) * r;
+            
+            // небольшая вариация по высоте, чтобы трава "торчала" из земли
+            const y = 0.0; 
+            
+            grassPositions.push(x, y, z);
+            
+            // цвет от светло-зеленого до темно-зеленого и желтоватого
+            const color = new THREE.Color().setHSL(0.3 + Math.random()*0.1, 0.7, 0.3 + Math.random()*0.3);
+            grassColors.push(color.r, color.g, color.b);
+        }
+        
+        grassGeometry.setAttribute('position', new THREE.Float32BufferAttribute(grassPositions, 3));
+        grassGeometry.setAttribute('color', new THREE.Float32BufferAttribute(grassColors, 3));
+        
+        const grassMaterial = new THREE.PointsMaterial({ 
+            size: 0.15, 
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.9,
+            map: createGrassBladeTexture() // маленькая текстура-травинка
+        });
+        
+        function createGrassBladeTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 8;
+            canvas.height = 8;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#8fbc8f';
+            ctx.fillRect(0, 0, 8, 8);
+            // рисуем вертикальную полоску
+            ctx.strokeStyle = '#2d5a27';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(4, 8);
+            ctx.lineTo(4, 0);
+            ctx.stroke();
+            // прозрачность по краям
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+        
+        const grassPoints = new THREE.Points(grassGeometry, grassMaterial);
+        grassPoints.position.y = 0; // чуть выше земли
+        scene.add(grassPoints);
+
+        // --- Функция создания дерева (ели и лиственные) ---
+        function createTree(x, z, type = 'pine') {
+            const group = new THREE.Group();
+            
+            // Случайная вариация высоты
+            const heightVar = 1.5 + Math.random() * 1.2;
+            
+            if (type === 'pine') {
+                // Ствол
+                const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4c3b, roughness: 0.9 });
+                const trunkGeo = new THREE.CylinderGeometry(0.5, 0.8, heightVar * 1.5);
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = heightVar * 0.75;
+                trunk.castShadow = true;
+                trunk.receiveShadow = true;
+                group.add(trunk);
+
+                // Крона из нескольких конусов (елочка)
+                const greenMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.6, emissive: 0x000000 });
+                
+                // Нижний ярус
+                const crown1 = new THREE.ConeGeometry(1.4, 1.5, 8);
+                const mesh1 = new THREE.Mesh(crown1, greenMat);
+                mesh1.position.y = heightVar * 1.2;
+                mesh1.castShadow = true;
+                mesh1.receiveShadow = true;
+                group.add(mesh1);
+                
+                // Средний ярус
+                const crown2 = new THREE.ConeGeometry(1.1, 1.3, 8);
+                const mesh2 = new THREE.Mesh(crown2, greenMat);
+                mesh2.position.y = heightVar * 1.8;
+                mesh2.castShadow = true;
+                mesh2.receiveShadow = true;
+                group.add(mesh2);
+                
+                // Верхний ярус
+                const crown3 = new THREE.ConeGeometry(0.8, 1.2, 8);
+                const mesh3 = new THREE.Mesh(crown3, greenMat);
+                mesh3.position.y = heightVar * 2.3;
+                mesh3.castShadow = true;
+                mesh3.receiveShadow = true;
+                group.add(mesh3);
+                
+            } else {
+                // Лиственное дерево
+                const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7d5535, roughness: 0.8 });
+                const trunkGeo = new THREE.CylinderGeometry(0.6, 0.9, heightVar);
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = heightVar / 2;
+                trunk.castShadow = true;
+                trunk.receiveShadow = true;
+                group.add(trunk);
+
+                // Крона - несколько сфер
+                const leafMat = new THREE.MeshStandardMaterial({ color: 0x4c7a3a, roughness: 0.5, emissive: 0x111111 });
+                
+                const leaf1 = new THREE.SphereGeometry(1.0, 5);
+                const l1 = new THREE.Mesh(leaf1, leafMat);
+                l1.position.set(0.4, heightVar + 0.2, 0.2);
+                l1.castShadow = true;
+                l1.receiveShadow = true;
+                group.add(l1);
+                
+                const leaf2 = new THREE.SphereGeometry(0.9, 5);
+                const l2 = new THREE.Mesh(leaf2, leafMat);
+                l2.position.set(-0.5, heightVar + 0.1, -0.3);
+                l2.castShadow = true;
+                l2.receiveShadow = true;
+                group.add(l2);
+                
+                const leaf3 = new THREE.SphereGeometry(1.1, 5);
+                const l3 = new THREE.Mesh(leaf3, leafMat);
+                l3.position.set(0.1, heightVar + 0.8, -0.2);
+                l3.castShadow = true;
+                l3.receiveShadow = true;
+                group.add(l3);
+                
+                const leaf4 = new THREE.SphereGeometry(0.8, 5);
+                const l4 = new THREE.Mesh(leaf4, leafMat);
+                l4.position.set(-0.1, heightVar + 0.5, 0.7);
+                l4.castShadow = true;
+                l4.receiveShadow = true;
+                group.add(l4);
+            }
+
+            group.position.set(x, 0, z);
+            return group;
+        }
+
+        // --- Заполняем лес деревьями ---
+        // Несколько елей и лиственных вокруг спавна (центр в районе 0,0)
+        const treePositions = [];
+        
+        // Случайные позиции в радиусе от 3 до 18 метров
+        for (let i = 0; i < 50; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 3 + Math.random() * 16; // от 3 до 19 метров
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            
+            // Избегаем слишком близко к спавну (0,0) но оставляем несколько рядом
+            if (Math.sqrt(x*x + z*z) < 2.5 && i > 10) continue; // но все же пусть будут деревья почти вокруг
+            
+            treePositions.push({ x, z });
+        }
+        
+        // Добавим несколько деревьев прямо рядом со спавном для ощущения густого леса
+        treePositions.push({ x: 2.5, z: 2.0 });
+        treePositions.push({ x: -2.0, z: 3.0 });
+        treePositions.push({ x: -3.0, z: -1.5 });
+        treePositions.push({ x: 1.0, z: -3.2 });
+        treePositions.push({ x: 4.0, z: -1.0 });
+        treePositions.push({ x: -1.5, z: -2.8 });
+        treePositions.push({ x: 3.3, z: 2.8 });
+
+        treePositions.forEach(pos => {
+            // случайный тип дерева: 70% елей, 30% лиственных
+            const type = Math.random() < 0.7 ? 'pine' : 'deciduous';
+            const tree = createTree(pos.x, pos.z, type);
+            scene.add(tree);
+        });
+
+        // --- Добавим мелкий кустарник (маленькие шарики) ---
+        for (let i = 0; i < 40; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 2 + Math.random() * 15;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            
+            const bushMat = new THREE.MeshStandardMaterial({ color: 0x3b6e3b, roughness: 0.7 });
+            const bushGeo = new THREE.SphereGeometry(0.4 + Math.random()*0.3, 4);
+            const bush = new THREE.Mesh(bushGeo, bushMat);
+            bush.position.set(x, 0.2, z);
+            bush.castShadow = true;
+            bush.receiveShadow = true;
+            scene.add(bush);
+        }
+
+        // --- Добавим несколько камней для разнообразия ---
+        for (let i = 0; i < 15; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 4 + Math.random() * 14;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            
+            const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7a, roughness: 0.9 });
+            const rockGeo = new THREE.DodecahedronGeometry(0.4 + Math.random()*0.3);
+            const rock = new THREE.Mesh(rockGeo, rockMat);
+            rock.position.set(x, 0.1, z);
+            rock.rotation.set(Math.random(), Math.random(), Math.random());
+            rock.castShadow = true;
+            rock.receiveShadow = true;
+            scene.add(rock);
+        }
+
+        // --- Небо с облаками? Добавим легкие облака для атмосферы (пара спрайтов) ---
+        // Это не обязательно, но можно сделать пару полупрозрачных сфер
+        const cloudMat = new THREE.MeshStandardMaterial({ color: 0xf0f8ff, emissive: 0x222222, transparent: true, opacity: 0.4 });
+        for (let i = 0; i < 8; i++) {
+            const cloudGroup = new THREE.Group();
+            const parts = 2 + Math.floor(Math.random() * 3);
+            for (let j = 0; j < parts; j++) {
+                const sphere = new THREE.Mesh(new THREE.SphereGeometry(1.2 + Math.random()*0.5, 5), cloudMat);
+                sphere.position.set((j-1)*1.1, Math.random()*0.8, 0);
+                sphere.castShadow = false;
+                sphere.receiveShadow = false;
+                cloudGroup.add(sphere);
+            }
+            cloudGroup.position.set((Math.random()-0.5)*30, 15 + Math.random()*8, (Math.random()-0.5)*30 - 10);
+            scene.add(cloudGroup);
+        }
+
+        // --- Небольшая полянка или тропинка? Оставим просто лес. Добавим светлячков (частицы) для волшебства ---
+        const fireflyGeo = new THREE.BufferGeometry();
+        const fireflyCount = 30;
+        const fireflyPositions = [];
+        for (let i = 0; i < fireflyCount; i++) {
+            const r = 2 + Math.random() * 15;
+            const a = Math.random() * Math.PI * 2;
+            const x = Math.cos(a) * r;
+            const z = Math.sin(a) * r;
+            const y = 0.5 + Math.random() * 2.5;
+            fireflyPositions.push(x, y, z);
+        }
+        fireflyGeo.setAttribute('position', new THREE.Float32BufferAttribute(fireflyPositions, 3));
+        const fireflyMat = new THREE.PointsMaterial({ color: 0xffdd88, size: 0.15, transparent: true, blending: THREE.AdditiveBlending });
+        const fireflies = new THREE.Points(fireflyGeo, fireflyMat);
+        scene.add(fireflies);
+
+        // --- Эффект тумана и небольшого ветра (через анимацию) ---
+
+        // --- Орбитальный контроллер с ограничениями, чтобы камера не уходила под землю и не слишком высоко ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2.2; // не даем уйти под землю
+        controls.minDistance = 1.5;
+        controls.maxDistance = 35;
+        controls.target.set(2, 1, 2); // смещаем цель немного вперед, чтобы спавн был по центру обзора, но камера уже стоит
+        
+        // Обновим цель контроллера, чтобы она соответствовала точке, куда смотрим
+        controls.target.set(4, 1.5, 5);
+
+        // --- Анимация и рендер ---
+        let clock = new THREE.Clock();
+
+        function animate() {
+            const delta = clock.getDelta();
+            const time = performance.now() / 1000;
+
+            // Легкое движение светлячков
+            if (fireflies) {
+                const positions = fireflies.geometry.attributes.position.array;
+                for (let i = 1; i < positions.length; i += 3) {
+                    // небольшое колебание по Y
+                    positions[i] += Math.sin(time + i) * 0.002;
+                }
+                fireflies.geometry.attributes.position.needsUpdate = true;
+            }
+
+            controls.update(); // для плавности
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        // --- Обработка ресайза окна ---
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Добавим маленький костер или просто яркий цветок на месте спавна? 
+        // Можно отметить место спавна светлым камнем или грибом
+        const spawnMarkerMat = new THREE.MeshStandardMaterial({ color: 0xdba56b, emissive: 0x442200 });
+        const spawnMarker = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 0.1), spawnMarkerMat);
+        spawnMarker.position.set(0, 0.05, 0);
+        spawnMarker.rotation.x = 0;
+        spawnMarker.receiveShadow = true;
+        spawnMarker.castShadow = true;
+        scene.add(spawnMarker);
+        
+        // Вокруг маркера маленькие белые цветочки
+        const flowerMat = new THREE.MeshStandardMaterial({ color: 0xfff0e0 });
+        for (let i=0; i<5; i++) {
+            const angle = (i/5)*Math.PI*2;
+            const r = 0.8;
+            const flower = new THREE.Mesh(new THREE.SphereGeometry(0.1, 3), flowerMat);
+            flower.position.set(Math.cos(angle)*r, 0.1, Math.sin(angle)*r);
+            flower.castShadow = true;
+            scene.add(flower);
+        }
+
+        console.log('Лес загружен, вы появились!');
+    </script>
+</body>
+</html>
